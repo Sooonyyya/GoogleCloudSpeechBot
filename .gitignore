@@ -1,0 +1,19 @@
+.env
+.env.*
+!.env.example
+credentials/
+**/service-account*.json
+**/*-credentials*.json
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.vs/
+*.pyproj.user
+*.suo
+*.user
+.DS_Store
+
+# Усі локальні JSON-ключі Google та їх випадкові назви
+*.json
