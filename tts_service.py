@@ -20,47 +20,120 @@ class TextToSpeechService:
         self._client = texttospeech.TextToSpeechClient()
 
     def list_voices(self, language: str) -> list[VoiceInfo]:
-        """Для PoC пропонуємо тільки Standard/WaveNet, як у вихідному проєкті."""
+        """Отримуємо доступні голоси з Google Cloud API."""
         response = self._client.list_voices(language_code=language)
         voices: list[VoiceInfo] = []
-        for voice in response.voices:
-            if "-Standard-" in voice.name:
-                family = "Standard"
-            elif "-Wavenet-" in voice.name:
-                family = "WaveNet"
-            else:
-                continue
-            gender = self._api.SsmlVoiceGender(voice.ssml_gender).name
-            voices.append(VoiceInfo(name=voice.name, gender=gender, family=family))
-        return sorted(voices, key=lambda v: (0 if v.family == "Standard" else 1, v.name))
 
-    def synthesize(self, raw_input: str, settings: UserPreferences) -> bytes:
-        text = validate_input(raw_input, is_ssml=settings.input_mode == "ssml")
+        for voice in response.voices:
+            if language == "uk-UA":
+                # Для української залишаємо один жіночий
+                # та один чоловічий голос.
+                if voice.name == "uk-UA-Standard-B":
+                    family = "Standard"
+                elif voice.name == "uk-UA-Chirp3-HD-Charon":
+                    family = "Chirp3-HD"
+                else:
+                    continue
+            else:
+                # Для інших мов залишаємо попередні голоси.
+                if "-Standard-" in voice.name:
+                    family = "Standard"
+                elif "-Wavenet-" in voice.name:
+                    family = "WaveNet"
+                else:
+                    continue
+
+            gender = self._api.SsmlVoiceGender(
+                voice.ssml_gender
+            ).name
+
+            voices.append(
+                VoiceInfo(
+                    name=voice.name,
+                    gender=gender,
+                    family=family
+                )
+            )
+
+        return sorted(
+            voices,
+            key=lambda v: (
+                0 if v.family == "Standard"
+                else 1 if v.family == "Chirp3-HD"
+                else 2,
+                v.name
+            )
+        )
+
+    def synthesize(
+        self,
+        raw_input: str,
+        settings: UserPreferences
+    ) -> bytes:
+
+        text = validate_input(
+            raw_input,
+            is_ssml=settings.input_mode == "ssml"
+        )
+
+        is_chirp = (
+            "-Chirp3-HD-" in settings.voice_name
+        )
+
+
         synthesis_input = (
             self._api.SynthesisInput(ssml=text)
             if settings.input_mode == "ssml"
             else self._api.SynthesisInput(text=text)
         )
-        voice_kwargs = {"language_code": settings.language}
+
+        voice_kwargs = {
+            "language_code": settings.language
+        }
+
         if settings.voice_name:
             voice_kwargs["name"] = settings.voice_name
-        request_voice = self._api.VoiceSelectionParams(**voice_kwargs)
+
+        request_voice = self._api.VoiceSelectionParams(
+            **voice_kwargs
+        )
+
         encoding = (
             self._api.AudioEncoding.MP3
             if settings.audio_format == "MP3"
             else self._api.AudioEncoding.LINEAR16
         )
+
         audio_kwargs = {
             "audio_encoding": encoding,
             "speaking_rate": settings.speed,
-            "pitch": settings.pitch,
         }
-        if settings.device_profile != "none":
-            audio_kwargs["effects_profile_id"] = [settings.device_profile]
-        audio_config = self._api.AudioConfig(**audio_kwargs)
-        response = self._client.synthesize_speech(
-            input=synthesis_input, voice=request_voice, audio_config=audio_config
+
+        if not is_chirp:
+            # Для Standard/WaveNet залишаємо
+            # налаштування висоти та профілю пристрою.
+            audio_kwargs["pitch"] = settings.pitch
+
+            if settings.device_profile != "none":
+                audio_kwargs["effects_profile_id"] = [
+                    settings.device_profile
+                ]
+
+        # Для Chirp 3 HD не передаємо pitch
+        # та effects_profile_id.
+        audio_config = self._api.AudioConfig(
+            **audio_kwargs
         )
+
+        response = self._client.synthesize_speech(
+            input=synthesis_input,
+            voice=request_voice,
+            audio_config=audio_config
+        )
+
         if not response.audio_content:
-            raise RuntimeError("Google Cloud повернув порожній аудіофайл.")
+            raise RuntimeError(
+                "Google Cloud повернув порожній аудіофайл."
+            )
+
         return bytes(response.audio_content)
